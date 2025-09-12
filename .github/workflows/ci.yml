@@ -1,0 +1,72 @@
+name: IZA OS Ops CI Pipeline
+on: 
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  terraform-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+          
+      - name: Terraform Format Check
+        run: |
+          if find . -name "*.tf" -o -name "*.tfvars" | head -1 | grep -q .; then
+            terraform fmt -check -recursive
+          else
+            echo "No Terraform files found"
+          fi
+          
+      - name: Terraform Validate
+        run: |
+          if find . -name "*.tf" | head -1 | grep -q .; then
+            find . -name "*.tf" -exec dirname {} \; | sort -u | while read dir; do
+              echo "Validating $dir"
+              cd "$dir"
+              terraform init -backend=false
+              terraform validate
+              cd - > /dev/null
+            done
+          fi
+
+  kubernetes-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Validate Kubernetes manifests
+        run: |
+          if find . -name "*.yaml" -o -name "*.yml" | head -1 | grep -q .; then
+            # Install kubeval
+            wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+            tar xf kubeval-linux-amd64.tar.gz
+            sudo mv kubeval /usr/local/bin
+            
+            # Validate all YAML files that look like Kubernetes manifests
+            find . -name "*.yaml" -o -name "*.yml" | xargs -I {} sh -c 'if grep -q "apiVersion\|kind" "{}"; then kubeval "{}"; fi'
+          else
+            echo "No Kubernetes manifests found"
+          fi
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Build Docker images
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t iza-os-ops:test .
+          else
+            echo "No Dockerfile found"
+          fi
